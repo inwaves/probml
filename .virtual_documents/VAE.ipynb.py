@@ -129,12 +129,8 @@ class BernoulliImageGeneratorExpandedSampling(nn.Module):
         return self.f(z)
 
     def loglik(self, x, z):
-      """ When this is called, the argument z is the value that a random variable Z takes on.
-          It's a bit confusing, because z is actually a vector of z_i that random variables Z_i take on.
-          This equates to the likelihood of each x_i under a particular choice of z - one sample. To take
-          multiple samples, we need to try multiple values of little z, which happens when this is called."""
-      xr = self(z)
-      return (x*torch.log(xr) + (1-x)*torch.log(1-xr)).sum((1, 2, 3))
+        xr = self(z)
+        return (x*torch.log(xr) + (1-x)*torch.log(1-xr)).sum((1, 2, 3))
 
 
 class GaussianEncoderExpandedSampling(nn.Module):
@@ -152,7 +148,7 @@ class GaussianEncoderExpandedSampling(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(128, self.d*2)
         )
-        self.likelihoods = []
+        self.likelihoods = {}
 
     def forward(self, x):
         μτ = self.g(x)
@@ -175,13 +171,9 @@ class GaussianEncoderExpandedSampling(nn.Module):
           ε = torch.randn_like(σ)
           ll += self.f.loglik(x, z=μ+σ*ε)
         ll /= num_samples
-
-        self.likelihoods.append()
-        if torch.min(ll) < self.min_likelihood[0]:
-          self.min_likelihood = torch.min(ll), torch.argmin(ll) + batch_num*100
-
-        if torch.max(ll) < self.max_likelihood[0]:
-          self.max_likelihood = torch.max(ll), torch.argmax(ll) + batch_num*100
+        
+        for i in range(x.shape[0]):
+            self.likelihoods[i + batch_num*100] = ll[i].detach().numpy()
 
         # Sum up all likelihoods to find likelihood of dataset.
         return ll - kl
@@ -191,7 +183,7 @@ expanded_sampling_vae = GaussianEncoderExpandedSampling(BernoulliImageGeneratorE
 optimizer = optim.Adam(expanded_sampling_vae.parameters())
 epoch = 0
 
-while epoch < 100:
+while epoch < 5:
     for batch_num, (images, labels) in enumerate(mnist_batched):
         optimizer.zero_grad()
         loglik_lb = torch.mean(expanded_sampling_vae.loglik_lb(batch_num, images))
@@ -199,6 +191,40 @@ while epoch < 100:
         optimizer.step()
     epoch += 1
     print(f"epoch: {epoch}, loglikelihood: {loglik_lb.item():.4}")
+    torch.save(expanded_sampling_vae.state_dict(), 'expanded_sampling_vae.pt')
+
+
+with torch.no_grad():
+    loglik_lb = 0
+    for batch_num, (images, labels) in enumerate(batched_holdout_set):
+        loglik_lb += torch.mean(expanded_sampling_vae.loglik_lb(batch_num, images))
+    print(loglik_lb/batch_num)
+    
+
+
+
+# Sort this dictionary for ascending likelihood.
+sorted_likelihoods = list(sorted(expanded_sampling_vae.likelihoods.items(), key = lambda item: item[1]))
+unlikely_images = []
+likely_images = []
+
+# Get mnist[i] for the bottom-most i and for the top-most i
+for index in sorted_likelihoods[:10]:
+    im, _ = mnist[index[0]]
+    unlikely_images.append(im[0])
+    
+for index in sorted_likelihoods[-10:]:
+    im, _ = mnist[index[0]]
+    likely_images.append(im[0])
+    
+# Look at them - what do they look like?
+fig = plt.figure(figsize=(10, 10))
+
+for i in range(len(unlikely_images)):
+    fig.add_subplot(2, 10, i+1)
+    plt.imshow(unlikely_images[i])
+    fig.add_subplot(1, 10, i+1)
+    plt.imshow(likely_images[i])
 
 
 # Save the trained model, we'll reuse it for the questions.
@@ -389,7 +415,26 @@ for i in range(x.shape[1]):
 torch.tensor(res)
 
 
+def get_greyscale(image):
+    img = image.detach().numpy()
+    return 784-np.count_nonzero(img < 0.2)-np.count_nonzero(img > 0.7)
 
+count_greyscale = [get_greyscale(img) for (img, _) in mnist]
+
+
+cts = [i for i in range(len(mnist))]
+d = dict(zip(cts, count_greyscale))
+
+d = list(sorted(d.items(), key=lambda item : item[1]))
+
+blurry_digits = [index for index, value in d[-12000:]]
+
+
+training_set = [mnist[index] for index in range(len(mnist)) if index not in blurry_digits]
+holdout_set = [mnist[index] for index in range(len(mnist)) if index in blurry_digits]
+
+batched_training_set = torch.utils.data.DataLoader(training_set, batch_size=100)
+batched_holdout_set = torch.utils.data.DataLoader(holdout_set, batch_size=100)
 
 
 
