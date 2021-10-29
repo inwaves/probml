@@ -28,6 +28,12 @@ plt.plot(epochs, heteroscedastic_training_likelihood)
 plt.plot(epochs, simple_training_loglik)
 
 
+mu, sigma = simple_vae(image)
+epsilon = torch.randn_like(sigma)
+z = mu + sigma*epsilon
+new_image = simple_vae.f(z)
+
+
 new_images = []
 
 for image in showr:
@@ -52,6 +58,11 @@ for i in range(1, cols*rows + 1):
 plt.show()
 
 
+# Sample 5 Zs with different noise and generate images from them.
+z = [mu + torch.randn_like(sigma)*sigma for _ in range(5)]
+new_images = [simple_vae.f(z_i) for z_i in z]
+
+
 image, _ = mnist[35508]
 image = image.reshape((1, 1, 28, 28)) # Must be [Bx1x28x28].
 mu, sigma = simple_vae(image)
@@ -73,6 +84,10 @@ plt.show()
 z_samples = [torch.rand(4) for _ in range(12)]
 generated_images = [simple_vae.f(z_i) for z_i in z_samples]
 
+
+z_samples = [torch.rand(1, 4) for _ in range(12)]
+generated_images = [simple_vae.f(z_i) for z_i in z_samples]
+
 fig = plt.figure(figsize=(10, 10))
 
 for i in range(len(generated_images)):
@@ -80,6 +95,13 @@ for i in range(len(generated_images)):
     plt.imshow(generated_images[i].detach().numpy()[0][0])
 plt.axis('off')
 plt.show()
+
+
+# Generate 10 z* interpolated between z1 and z2.
+interpolated_vars = []
+for _ in range(10):
+    coef = random.random()
+    interpolated_vars.append(z1 + coef*(z2-z1))
 
 
 (img1, _), (img2, _) = mnist[28001], mnist[43876]
@@ -139,15 +161,6 @@ plt.axis('off')
 plt.show()
 
 
-vae_more_dims = GaussianEncoder(BernoulliImageGenerator(d=20))
-optimizer = optim.Adam(vae_more_dims.parameters())
-epoch = 0
-
-while epoch < 10:
-    # ...
-    pass
-
-
 def get_greyscale(image):
     img = image.detach().numpy()
     return 784-np.count_nonzero(img < 0.2)-np.count_nonzero(img > 0.7)
@@ -169,12 +182,11 @@ batched_holdout_set = torch.utils.data.DataLoader(holdout_set, batch_size=100)
 
 
 with torch.no_grad():
-    loglik_lb, loglike_lb_more_dims = 0, 0
+    loglik_lb, loglik_lb_more_dims = 0, 0
     for batch_num, (images, labels) in enumerate(batched_holdout_set):
-        loglik_lb += torch.mean(simple_vae.loglik_lb(batch_num, images))
-        loglik_lb_more_dims += torch.mean(vae_more_dims.loglik_lb(batch_num, images))
-    print(f"Average log-likelihood of VAE with 4D latent space: {loglik_lb/batch_num}\n
-        Average log-likelihood of VAE with 20D latent space: {loglik_lb_more_dims/batch_num}")
+        loglik_lb += torch.mean(simple_vae.loglik_lb(images))
+        loglik_lb_more_dims += torch.mean(vae_more_dims.loglik_lb(images))
+    print(f"Average log-likelihood of VAE with 4D latent space: {loglik_lb/batch_num}\nAverage log-likelihood of VAE with 20D latent space: {loglik_lb_more_dims/batch_num}")
 
 
 y = [5, 3, 9, 1]
@@ -271,16 +283,14 @@ optimizer = optim.Adam(simple_wiggle.parameters())
 # heteroscedastic model.
 simple_training_loglik = []
 
-with Interruptable() as check_interrupted:
-    while epoch < 50000:
-        check_interrupted()
-        optimizer.zero_grad()
-        loglikelihood = torch.mean(simple_wiggle(y, x))
-        (-loglikelihood).backward()
-        optimizer.step()
-        epoch += 1
-        if epoch % 100 == 0:
-            simple_training_loglik.append(loglikelihood.item())
+while epoch < 50000:
+    optimizer.zero_grad()
+    loglikelihood = torch.mean(simple_wiggle(y, x))
+    (-loglikelihood).backward()
+    optimizer.step()
+    epoch += 1
+    if epoch % 100 == 0:
+        simple_training_loglik.append(loglikelihood.item())
 
 
 class HeteroscedasticRWiggle(nn.Module):
@@ -302,16 +312,14 @@ epoch = 0
 optimizer = optim.Adam(heteroscedastic_wiggle.parameters())
 heteroscedastic_training_likelihood = []
 
-with Interruptable() as check_interrupted:
-    while epoch < 50000:
-        check_interrupted()
-        optimizer.zero_grad()
-        loglikelihood = torch.mean(heteroscedastic_wiggle(y, x))
-        (-loglikelihood).backward()
-        optimizer.step()
-        epoch += 1
-        if epoch % 100 == 0:
-            heteroscedastic_training_likelihood.append(loglikelihood.item())
+while epoch < 50000:
+    optimizer.zero_grad()
+    loglikelihood = torch.mean(heteroscedastic_wiggle(y, x))
+    (-loglikelihood).backward()
+    optimizer.step()
+    epoch += 1
+    if epoch % 100 == 0:
+        heteroscedastic_training_likelihood.append(loglikelihood.item())
 
 
 class BernoulliImageGenerator(nn.Module):
@@ -454,7 +462,7 @@ class GaussianEncoderExpandedSampling(nn.Module):
         kl = 0.5 * (μ**2 + σ**2 - torch.log(σ**2) - 1).sum(1)
 
         ll = 0
-        num_samples = 1
+        num_samples = 100
         for _ in range(num_samples):
             ε = torch.randn_like(σ)
             ll += self.f.loglik(x, z=μ+σ*ε)
@@ -465,11 +473,6 @@ class GaussianEncoderExpandedSampling(nn.Module):
 
         # Sum up all likelihoods to find likelihood of dataset.
         return ll - kl
-
-
-expanded_sampling_vae = GaussianEncoderExpandedSampling(BernoulliImageGeneratorExpandedSampling())
-
-expanded_sampling_vae.load_state_dict(torch.load("expanded_sampling_vae.pt"))
 
 
 expanded_sampling_vae = GaussianEncoderExpandedSampling(BernoulliImageGeneratorExpandedSampling())
@@ -484,7 +487,6 @@ while epoch < 5:
         optimizer.step()
     epoch += 1
     print(f"epoch: {epoch}, loglikelihood: {loglik_lb.item():.4}")
-    torch.save(expanded_sampling_vae.state_dict(), 'expanded_sampling_vae.pt')
 
 
 def one_hot_encode(y, num_classes):
@@ -544,8 +546,6 @@ class GaussianEncoderWithStyleCapture(nn.Module):
         )
 
     def forward(self, x, y):
-        
-        # TODO: Coerce x and y into a form that we can input into the network.
         # Encode y as a 1x28x28, then stack it as an extra channel in the image.
         # So updated y is 100x1x28x28.
         transform_labels = nn.Linear(10, 784)
@@ -576,4 +576,42 @@ class GaussianEncoderWithStyleCapture(nn.Module):
 
 cvae = GaussianEncoderWithStyleCapture(BernoulliImageGeneratorWithStyleCapture(4))
 
-cvae.load_state_dict(torch.load("cvae.pt"))
+optimizer = optim.Adam(cvae.parameters())
+epoch = 0
+
+while epoch < 30:
+    for batch_num, (images, labels) in enumerate(mnist_batched):
+        optimizer.zero_grad()
+        labels = one_hot_encode(labels, 10)
+        loglik_lb = torch.mean(cvae.loglik_lb(images, labels))
+        (-loglik_lb).backward()
+        optimizer.step()
+    epoch += 1
+    print(f"epoch: {epoch}, loglikelihood: {loglik_lb.item():.4}")
+
+
+showr = show.unsqueeze(1)
+
+
+new_images = []
+
+for image in showr:
+    
+    # Add the original image.
+    new_images.append(image.detach().numpy()[0][0])
+    
+    # Generate 3 reconstructions of the image.
+    for i in range(3):
+        mu, sigma = simple_vae(image)
+        epsilon = torch.randn_like(sigma)
+        z = mu + sigma*epsilon
+        new_image = simple_vae.f(z)
+        new_images.append(new_image.detach().numpy()[0][0])
+
+cols, rows = 4, 4
+fig = plt.figure(figsize=(10, 10))
+
+for i in range(1, cols*rows + 1):
+    fig.add_subplot(rows, cols, i)
+    plt.imshow(new_images[i-1])
+plt.show()
