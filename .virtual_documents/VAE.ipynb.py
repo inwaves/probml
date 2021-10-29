@@ -84,6 +84,27 @@ class GaussianEncoder(nn.Module):
         return ll - kl
 
 
+simple_vae = GaussianEncoder(BernoulliImageGenerator())
+optimizer = optim.Adam(simple_vae.parameters())
+epoch = 0
+
+while epoch < 50:
+    for batch_num, (images, labels) in enumerate(mnist_batched):
+        optimizer.zero_grad()
+        loglik_lb = torch.mean(simple_vae.loglik_lb(images))
+        (-loglik_lb).backward()
+        optimizer.step()
+    epoch += 1
+    print(f"epoch: {epoch}, loglikelihood: {loglik_lb.item():.4}")
+    
+    # Save the trained model, we'll reuse it for the questions.
+    torch.save(simple_vae.state_dict(), 'simple_vae.pt')
+
+
+# Save the trained model, we'll reuse it for the questions.
+torch.save(simple_vae.state_dict(), 'simple_vae.pt')
+
+
 class BernoulliImageGeneratorExpandedSampling(nn.Module):
     def __init__(self, d=4):
         super().__init__()
@@ -131,8 +152,7 @@ class GaussianEncoderExpandedSampling(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(128, self.d*2)
         )
-        self.max_likelihood = (0, 0)
-        self.min_likelihood = (0, 0)
+        self.likelihoods = []
 
     def forward(self, x):
         μτ = self.g(x)
@@ -156,6 +176,7 @@ class GaussianEncoderExpandedSampling(nn.Module):
           ll += self.f.loglik(x, z=μ+σ*ε)
         ll /= num_samples
 
+        self.likelihoods.append()
         if torch.min(ll) < self.min_likelihood[0]:
           self.min_likelihood = torch.min(ll), torch.argmin(ll) + batch_num*100
 
@@ -164,6 +185,24 @@ class GaussianEncoderExpandedSampling(nn.Module):
 
         # Sum up all likelihoods to find likelihood of dataset.
         return ll - kl
+
+
+expanded_sampling_vae = GaussianEncoderExpandedSampling(BernoulliImageGeneratorExpandedSampling())
+optimizer = optim.Adam(expanded_sampling_vae.parameters())
+epoch = 0
+
+while epoch < 100:
+    for batch_num, (images, labels) in enumerate(mnist_batched):
+        optimizer.zero_grad()
+        loglik_lb = torch.mean(expanded_sampling_vae.loglik_lb(batch_num, images))
+        (-loglik_lb).backward()
+        optimizer.step()
+    epoch += 1
+    print(f"epoch: {epoch}, loglikelihood: {loglik_lb.item():.4}")
+
+
+# Save the trained model, we'll reuse it for the questions.
+torch.save(expanded_sampling_vae.state_dict(), 'expanded_sampling_vae.pt')
 
 
 def one_hot_encode(y, num_classes):
@@ -257,7 +296,7 @@ autoencoder = GaussianEncoderWithStyleCapture(BernoulliImageGeneratorWithStyleCa
 optimizer = optim.Adam(autoencoder.parameters())
 epoch = 0
 
-while epoch < 10:
+while epoch < 30:
     for batch_num, (images, labels) in enumerate(mnist_batched):
         optimizer.zero_grad()
         labels = one_hot_encode(labels, 10)
@@ -266,21 +305,41 @@ while epoch < 10:
         optimizer.step()
     epoch += 1
     print(f"epoch: {epoch}, loglikelihood: {loglik_lb.item():.4}")
+    
+    torch.save(autoencoder.state_dict(), 'cvae.pt')
 
 
 torch.save(autoencoder.state_dict(), 'cvae.pt')
 
 
-simple_vae = GaussianEncoder(BernoulliImageGenerator())
-simple_vae.load_state_dict(torch.load("4-dim-100-epoch.pt"))
+autoencoder = GaussianEncoderWithStyleCapture(BernoulliImageGeneratorWithStyleCapture(4))
+autoencoder.load_state_dict(torch.load("cvae.pt"))
 
 
-z = torch.randn(4).unsqueeze(1).T
-y = [8]
+y_encoded[0].unsqueeze(-1).T.shape
+
+
+y = [5, 3, 9, 1]
+y_encoded = one_hot_encode(y, 10)
+all_images = []
+
+for _ in range(4):
+    z = torch.randn(4).unsqueeze(1).T
+    all_images.append([autoencoder.f(z, y_i.unsqueeze(1).T).detach().numpy() for y_i in y_encoded])
+
+print(len(all_images[0]))
+fig = plt.figure(figsize=(10, 10))
+for j in range(len(all_images)):
+    for i in range(len(all_images[j])):
+        fig.add_subplot(len(all_images[j]), len(all_images), 4*j+(i+1))
+        plt.imshow(all_images[j][i][0][0])
+
+
+y = [2]
 y_t = one_hot_encode(y, 10)
 
-rec_image = autoencoder.f(z, y_t).detach().numpy()
 
+rec_image = autoencoder.f(z, y_t).detach().numpy()
 
 plt.imshow(rec_image[0][0])
 
@@ -316,19 +375,21 @@ z = torch.randn((100, 4))
 z.shape
 
 
-y = torch.floor(torch.rand((100,))*10)
-y = torch.unsqueeze(y, 1)
+x = torch.zeros((1, 10))
+y = torch.ones((1, 10))
+
+x, y
 
 
-torch.cat([z, y], dim=1)
+res = []
+x, y = x.detach().numpy(), y.detach().numpy()
+for i in range(x.shape[1]):
+    res.append((x[0][i], y[0][i]))
+    
+torch.tensor(res)
 
 
-y
 
 
-lin = nn.Linear(1, 4)
 
 
-res = torch.tensor([lin(y_i).detach().numpy() for y_i in y])
-
-res
