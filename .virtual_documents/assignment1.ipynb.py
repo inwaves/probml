@@ -14,9 +14,6 @@ xkcd = pandas.read_csv(url)
 plt.scatter(xkcd.x, xkcd.y)
 
 
-xkcd.x
-
-
 import signal
 class Interruptable():
     class Breakout(Exception):
@@ -84,8 +81,6 @@ class RWiggle(nn.Module):
         return - 0.5*torch.log(2*np.pi*sigma2) - torch.pow(y - self.mu(x), 2) / (2*sigma2)
 
 
-x = torch.tensor(xkcd.x, dtype=torch.float)[:, None]
-y = torch.tensor(xkcd.y, dtype=torch.float)[:, None]
 
 simple_wiggle = RWiggle()
 epoch = 0
@@ -144,20 +139,22 @@ heteroscedastic_wiggle = HeteroscedasticRWiggle()
 epoch = 0
 optimizer = optim.Adam(heteroscedastic_wiggle.parameters())
 heteroscedastic_training_likelihood = []
+sigma_history = []
+mu_history = []
 
 with Interruptable() as check_interrupted:
     while epoch < 50000:
         check_interrupted()
         optimizer.zero_grad()
         loglikelihood = torch.mean(heteroscedastic_wiggle(y, x))
+        if epoch % 100 == 0:
+            with torch.no_grad():
+                heteroscedastic_training_likelihood.append(loglikelihood.item())
+                sigma_history.append(heteroscedastic_wiggle.sigma(x))
+                mu_history.append(heteroscedastic_wiggle.mu(x))
         (-loglikelihood).backward()
         optimizer.step()
         epoch += 1
-        if epoch % 100 == 0:
-            heteroscedastic_training_likelihood.append(loglikelihood.item())
-#             print(f'epoch=={epoch}, loglik={loglikelihood.item():.4}')
-            
-#             print(f'sigma={heteroscedastic_wiggle.sigma(x)}')
 
 
 mu_x = heteroscedastic_wiggle.mu(x).detach().numpy()
@@ -165,6 +162,32 @@ sigma = heteroscedastic_wiggle.sigma(x).detach().numpy()
 
 plt.plot(xkcd.x, mu_x)
 plt.fill_between(xkcd.x, (mu_x-1.96*sigma).reshape(31,), (mu_x+1.96*sigma).reshape(31,), alpha=0.2)
+
+
+def loglik(mu, sig):
+    sigma2 = torch.pow(sig, 2)
+    return - 0.5*torch.log(2*np.pi*sigma2) - torch.pow(y - mu, 2) / (2*sigma2)
+
+
+mu_x = mu_history[52]
+sigma = sigma_history[52]
+
+# torch.mean(loglik(mu_history[51], sigma_history[51])), heteroscedastic_training_likelihood[51]
+
+plt.plot(xkcd.x, mu_x)
+plt.fill_between(xkcd.x, (mu_x-1.96*sigma).reshape(31,), (mu_x+1.96*sigma).reshape(31,), alpha=0.2)
+
+
+mu_x = mu_history[51]
+sigma = sigma_history[51]
+
+# torch.mean(loglik(mu_history[51], sigma_history[51])), heteroscedastic_training_likelihood[51]
+
+plt.plot(xkcd.x, mu_x)
+plt.fill_between(xkcd.x, (mu_x-1.96*sigma).reshape(31,), (mu_x+1.96*sigma).reshape(31,), alpha=0.2)
+
+
+torch.mean(loglik(mu_history[53], sigma_history[53])), heteroscedastic_training_likelihood[53]
 
 
 def q(x):
@@ -177,10 +200,10 @@ q_res = q(x)
 np.sum(q_res * np.log(q_res))
 
 
-epochs = np.arange(1, 50000, 100)
+epochs = np.arange(5000, 6000, 100)
 
-plt.plot(epochs, heteroscedastic_training_likelihood)
-plt.plot(epochs, simple_training_loglik)
+plt.plot(epochs, heteroscedastic_training_likelihood[50:60])
+plt.plot(epochs, simple_training_loglik[50:60])
 
 
 import torchvision

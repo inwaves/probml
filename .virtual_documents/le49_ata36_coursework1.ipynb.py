@@ -22,10 +22,34 @@ q_x = q(x)
 np.sum(q_x * np.log(q_x))
 
 
-epochs = np.arange(1, 50000, 100)
+epochs = np.arange(1000, 50000, 100)
 
-plt.plot(epochs, heteroscedastic_training_likelihood)
-plt.plot(epochs, simple_training_loglik)
+plt.plot(epochs, heteroscedastic_training_likelihood[10:])
+plt.plot(epochs, simple_training_loglik[10:])
+
+
+epochs = np.arange(20000, 23000, 100)
+
+plt.plot(epochs, heteroscedastic_training_likelihood[200:230])
+plt.plot(epochs, simple_training_loglik[200:230])
+
+
+mu_x = mu_history[220]
+sigma = sigma_history[220]
+
+# torch.mean(loglik(mu_history[51], sigma_history[51])), heteroscedastic_training_likelihood[51]
+
+plt.plot(xkcd.x, mu_x)
+plt.fill_between(xkcd.x, (mu_x-1.96*sigma).reshape(31,), (mu_x+1.96*sigma).reshape(31,), alpha=0.2)
+
+
+mu_x = mu_history[221]
+sigma = sigma_history[221]
+
+# torch.mean(loglik(mu_history[51], sigma_history[51])), heteroscedastic_training_likelihood[51]
+
+plt.plot(xkcd.x, mu_x)
+plt.fill_between(xkcd.x, (mu_x-1.96*sigma).reshape(31,), (mu_x+1.96*sigma).reshape(31,), alpha=0.2)
 
 
 mu, sigma = simple_vae(image)
@@ -59,7 +83,7 @@ plt.show()
 
 
 # Sample 5 Zs with different noise and generate images from them.
-z = [mu + torch.randn_like(sigma)*sigma for _ in range(5)]
+z = [mu + torch.randn_like(sigma)*sigma for i in range(5)]
 new_images = [simple_vae.f(z_i) for z_i in z]
 
 
@@ -67,9 +91,8 @@ image, _ = mnist[35508]
 image = image.reshape((1, 1, 28, 28)) # Must be [Bx1x28x28].
 mu, sigma = simple_vae(image)
 
-# TODO: should this have some K*noise*sigma?
 # Sample 5 Zs with different noise and generate images from them.
-z = [mu + torch.randn_like(sigma)*sigma for _ in range(5)]
+z = [mu + k*torch.randn_like(sigma)*sigma for k in range(5)]
 new_images = [simple_vae.f(z_i) for z_i in z]
 fig = plt.figure(figsize=(10, 10))
 
@@ -217,8 +240,49 @@ import torchvision
 import random
 
 
+import signal
+class Interruptable():
+    class Breakout(Exception):
+        pass
+    def __init__(self):
+        self.interrupted = False
+        self.orig_handler = None
+    def __enter__(self):
+        self.orig_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, self.handle)
+        return self.check
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        signal.signal(signal.SIGINT, self.orig_handler)
+        if exc_type == Interruptable.Breakout:
+            print(' stopped')
+            return True
+        return False
+    def handle(self, signal, frame):
+        if self.interrupted:
+            self.orig_handler(signal, frame)
+        print('Interrupting ...', end='')
+        self.interrupted = True
+    def check(self):
+        if self.interrupted:
+            raise Interruptable.Breakout
+            
+def enumerate_cycle(g, shuffle=True):
+    epoch = 0
+    while True:
+        if shuffle:
+            for i,j in enumerate(np.random.permutation(len(g))):
+                yield (epoch,i), g[j]
+        else:
+            for i,x in enumerate(g):
+                yield (epoch,i), x
+        epoch = epoch + 1
+
+
 url = 'https://www.cl.cam.ac.uk/teaching/2122/DataSci/data/xkcd.csv'
 xkcd = pandas.read_csv(url)
+
+x = torch.tensor(xkcd.x, dtype=torch.float)[:, None]
+y = torch.tensor(xkcd.y, dtype=torch.float)[:, None]
 
 plt.scatter(xkcd.x, xkcd.y)
 
@@ -271,9 +335,6 @@ class RWiggle(nn.Module):
         return - 0.5*torch.log(2*np.pi*sigma2) - torch.pow(y - self.mu(x), 2) / (2*sigma2)
 
 
-x = torch.tensor(xkcd.x, dtype=torch.float)[:, None]
-y = torch.tensor(xkcd.y, dtype=torch.float)[:, None]
-
 simple_wiggle = RWiggle()
 epoch = 0
 optimizer = optim.Adam(simple_wiggle.parameters())
@@ -311,15 +372,22 @@ heteroscedastic_wiggle = HeteroscedasticRWiggle()
 epoch = 0
 optimizer = optim.Adam(heteroscedastic_wiggle.parameters())
 heteroscedastic_training_likelihood = []
+sigma_history = []
+mu_history = []
 
-while epoch < 50000:
-    optimizer.zero_grad()
-    loglikelihood = torch.mean(heteroscedastic_wiggle(y, x))
-    (-loglikelihood).backward()
-    optimizer.step()
-    epoch += 1
-    if epoch % 100 == 0:
-        heteroscedastic_training_likelihood.append(loglikelihood.item())
+with Interruptable() as check_interrupted:
+    while epoch < 50000:
+        check_interrupted()
+        optimizer.zero_grad()
+        loglikelihood = torch.mean(heteroscedastic_wiggle(y, x))
+        if epoch % 100 == 0:
+            with torch.no_grad():
+                heteroscedastic_training_likelihood.append(loglikelihood.item())
+                sigma_history.append(heteroscedastic_wiggle.sigma(x))
+                mu_history.append(heteroscedastic_wiggle.mu(x))
+        (-loglikelihood).backward()
+        optimizer.step()
+        epoch += 1
 
 
 class BernoulliImageGenerator(nn.Module):
@@ -384,7 +452,7 @@ optimizer = optim.Adam(simple_vae.parameters())
 epoch = 0
 
 while epoch < 10:
-    for batch_num, (images, _) in enumerate(batched_training_set):
+    for batch_num, (images, _) in enumerate(mnist_batched):
         optimizer.zero_grad()
         loglik_lb = torch.mean(simple_vae.loglik_lb(images))
         (-loglik_lb).backward()
