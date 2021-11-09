@@ -4,6 +4,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 import scipy.io, scipy.stats, scipy.linalg
 from numpy.linalg import solve
+from tqdm import tqdm
+
 import requests, io
 
 
@@ -16,21 +18,82 @@ with io.BytesIO(r.content) as f:
     N = G.shape[0]      # number of games N = 1801
 
 
+winner, loser = G[0, :]
+
+W[winner], W[loser]
+
+
 pv = 0.5 * np.ones(M)   # prior variance
 w = np.zeros(M)         # skills, initialized to be the prior mean μ0 = 0
+skills_across_iterations = [w]
 
-for _ in range(1100):
+for iteration in tqdm(range(4000)):
     # Sample performance differences (t) given skills (w) and outcomes (G)
-    s = w[G[:,0]] - w[G[:,1]]
+    s = w[G[:,0]] - w[G[:,1]] # Deterministic skill difference.
     σ = 1
+    
+    # Skill difference plus some noise epsilon.
     t = s + σ * scipy.stats.norm.ppf(1 - np.random.uniform(size=N)*(1-scipy.stats.norm.cdf(-s/σ)))
 
-    # Sample skills given performance differences
-    Σinv = ...
+    # Sample skills given performance differences, i.e. 
+    # Find some covariance and mean and distribute the new skills according to that.
+    inverse_Sigma_tilde = np.zeros((M, M))
+    mu_tilde = np.zeros(M)
+    
+    # This would compute each game precision matrix and add it to the inverse Σ~
+    # But here it just happens directly for conciseness.
+    for g in range(N):
+        inverse_Sigma_tilde[G[g, 0], G[g, 0]] += 1
+        inverse_Sigma_tilde[G[g, 1], G[g, 1]] += 1
+        inverse_Sigma_tilde[G[g, 0], G[g, 1]] -= 1
+        inverse_Sigma_tilde[G[g, 1], G[g, 0]] -= 1
+        
+    # Compute μ~: for all players i in M, for all games g in G, if the player won game g, add t[g], otherwise add -t[g] to mu_tilde[i]
+    for i in range(M):
+        for g in range(N):
+            if G[g, 0] == i:
+                mu_tilde[i] += t[g]
+            elif G[g, 1] == i:
+                mu_tilde[i] -= t[g]
+        
+    # Saving a call to np.linalg.inv by just inverting the diagonal covariance Sigma_0 directly.
+    Σinv = np.diag(1/pv) + inverse_Sigma_tilde
     Σ = np.linalg.inv(Σinv)
-    μtilde = ...
-    μ = Σ @ μtilde
+    μ = Σ @ mu_tilde
     w = np.random.multivariate_normal(mean=μ, cov=Σ)
+    
+    # Storing results across iterations for plotting.
+    skills_across_iterations.append(w)
+
+
+with open('skills.txt','wb') as f:
+    for sk in skills_across_iterations:
+        np.savetxt(f, sk, fmt='get_ipython().run_line_magic(".2f')", "")
+
+
+[(pl[0], np.mean(pl[1])) for pl in player_subset]
+
+
+fig = plt.figure(figsize=(30,6))
+
+num_iterations = list(range(len(skills_across_iterations)))
+player_subset = [(W[i], [skills_across_iterations[j][i] for j in range(len(skills_across_iterations))]) for i in range(6)]
+
+for i in range(6):
+    ax = fig.add_subplot(2, 3, i+1) # 2 rows of panels, 3 columns
+    ax.plot(num_iterations, player_subset[i][1])
+    ax.set_title(f'{player_subset[i][0]}', fontsize=10)
+
+
+fig = plt.figure(figsize=(30,6))
+
+num_iterations = list(range(len(skills_across_iterations)))
+player_subset = [(W[i], [skill_progression[i] for skill_progression in skills_across_iterations]) for i in range(6)]
+
+for i in range(6):
+    ax = fig.add_subplot(2, 3, i+1) # 2 rows of panels, 3 columns
+    ax.acorr(player_subset[i][1] - np.mean(player_subset[i][1]), maxlags=40)
+    ax.set_title(f'{player_subset[i][0]}', fontsize=10)
 
 
 def gaussian_ep(G, M):
