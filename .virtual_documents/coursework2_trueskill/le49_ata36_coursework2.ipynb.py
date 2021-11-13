@@ -18,6 +18,28 @@ with io.BytesIO(r.content) as f:
     N = G.shape[0]      # number of games N = 1801
 
 
+# Sample skills given performance differences
+inverse_Sigma_tilde = np.zeros((M, M))
+mu_tilde = np.zeros(M)
+
+# Compute Σ~^{-1}
+for g in range(N):
+    inverse_Sigma_tilde[G[g, 0], G[g, 0]] += 1
+    inverse_Sigma_tilde[G[g, 1], G[g, 1]] += 1
+    inverse_Sigma_tilde[G[g, 0], G[g, 1]] -= 1
+    inverse_Sigma_tilde[G[g, 1], G[g, 0]] -= 1
+
+# Compute μ~
+for i in range(M):
+    for g in range(N):
+        if G[g, 0] == i:
+            mu_tilde[i] += t[g]
+        elif G[g, 1] == i:
+            mu_tilde[i] -= t[g]
+
+Σinv = np.diag(1/pv) + inverse_Sigma_tilde
+
+
 pv = 0.5 * np.ones(M)   # prior variance
 w = np.zeros(M)         # skills, initialized to be the prior mean μ0 = 0
 skills_across_iterations = [w]
@@ -30,8 +52,7 @@ for iteration in tqdm(range(1100)):
     # Sample t according to the skill difference plus some noise epsilon.
     t = s + σ * scipy.stats.norm.ppf(1 - np.random.uniform(size=N)*(1-scipy.stats.norm.cdf(-s/σ)))
 
-    # Sample skills given performance differences, i.e. 
-    # Find some mean and covariance and distribute the new skills according to that.
+    # Sample skills given performance differences
     inverse_Sigma_tilde = np.zeros((M, M))
     mu_tilde = np.zeros(M)
     
@@ -59,7 +80,6 @@ for iteration in tqdm(range(1100)):
     skills_across_iterations.append(w)
 
 
-## This cell is used by multiple experiments below, it's likely you will need to run it.
 num_iterations = list(range(len(skills_across_iterations)))
 
 # Selecting a subset or players whose skill samples to look at.
@@ -80,6 +100,12 @@ for i in range(6):
     ax = fig.add_subplot(2, 3, i+1) # 2 rows of panels, 3 columns
     ax.acorr(player_subset[i][1] - np.mean(player_subset[i][1]), maxlags=40)
     ax.set_title(f'{player_subset[i][0]}', fontsize=10)
+
+
+# Here I try thinning by taking every 10 samples.
+stride = 10
+thinned_num_iterations = list(range(0, len(skills_across_iterations), stride))
+thinned_player_subset = [(W[i], [skills_across_iterations[j][i] for j in range(0, len(skills_across_iterations), stride)]) for i in players]
 
 
 # Here I try thinning by taking every 10 samples.
@@ -145,8 +171,20 @@ def gaussian_ep(G, M):
         yield (μ_s, np.sqrt(1/p_s))
 
 
+# Run message passing.
+for it in range(num_iter):
+    mu_s, sig_s = next(g)
+    mu_across_iterations.append(mu_s)
+    sigma_across_iterations.append(sig_s)
+
+# For each of our selected players, get their μ, σ across the iterations of message passing.
+player_mu_sig = [(W[i], [mu_across_iterations[j][i] for j in range(len(mu_across_iterations))], [sigma_across_iterations[j][i] for j in range(len(sigma_across_iterations))]) for i in players]
+
+
 g = gaussian_ep(G, M)
 mu_across_iterations, sigma_across_iterations = [], []
+num_iter = 100
+iterations = list(range(100))
 
 for it in range(num_iter):
     mu_s, sig_s = next(g)
@@ -165,7 +203,15 @@ for i in range(6):
     ax.set_title(f'{player_mu_sig[i][0]}', fontsize=10)
 
 
-player_at_convergence = [] # List of player name, their skill mean, and their skill standard deviation.
+# Generate a list of player names, their converged skill mean and standard deviation.
+# Use it to annotate the plots in question (a).
+player_at_convergence = [] 
+for player in player_mu_sig:
+    player_at_convergence.append((player[0], player[1][-1], player[2][-1]))
+
+
+# List of player name, their converged skill mean and standard deviation.
+player_at_convergence = [] 
 for player in player_mu_sig:
     player_at_convergence.append((player[0], player[1][-1], player[2][-1]))
     
@@ -192,17 +238,22 @@ plt.show()
 
 
 mu_n = nadal_marginal_samples.mean()
-sd_n = 0.2 # Eyeballing the histogram of (marginal samples - their mean) shows σ_n approximately equal to 0.2.
 
+# Eyeballing the histogram of (marginal samples - their mean) 
+# shows σ_n approximately equal to 0.2.
+sd_n = 0.2 
 nadal_recovered_dist = scipy.stats.norm(mu_n, sd_n)
-x_n = np.linspace(mu_n - 3 * sd_n, mu_n + 3 * sd_n)
+
+
+mu_n = nadal_marginal_samples.mean()
+sd_n = 0.2 # Eyeballing the histogram of (marginal samples - their mean) shows σ_n approximately equal to 0.2.
+nadal_recovered_dist = scipy.stats.norm(mu_n, sd_n)
 
 # Now do the same for Djokovic.
 mu_d = djokovic_marginal_samples.mean()
 sd_d = 0.22 # Eyeballing the histogram of (marginal samples - their mean) shows σ_s approximately equal to 0.22.
 
 djokovic_recovered_dist = scipy.stats.norm(mu_d, sd_d)
-x_d = np.linspace(mu_d - 3 * sd_d, mu_d + 3 * sd_d)
 
 
 mu_diff = mu_n - mu_d
@@ -213,19 +264,27 @@ W_d = scipy.stats.norm(mu_diff, sd_diff)
 f"p(W0 > W15) = {W_d.sf(0):.3f}, using reconstructed marginals."
 
 
-# To find the probability directly from the joint distribution, we can count in how many of the samples w0 > w15.
+# To find the probability directly from the joint distribution, 
+# we can count in how many of the samples w0 > w15.
 nadal_higher_skill = 0
 for sample in skills_across_iterations[10:]:
     if sample[0] > sample[15]:
         nadal_higher_skill += 1
 
-f"p(W0 > W15) = {nadal_higher_skill/(len(skills_across_iterations)-10):.3f}, corresponding to {nadal_higher_skill}/{len(skills_across_iterations)-10} samples."
+f"p(W0 > W15) = {nadal_higher_skill/(len(skills_across_iterations)-10):.3f}, based on {nadal_higher_skill}/{len(skills_across_iterations)-10} samples."
 
 
 plt.scatter(nadal_marginal, djokovic_marginal, alpha=0.6, color='teal')
 plt.xlabel("nadal_skill")
 plt.ylabel("djokovic_skill")
 plt.plot([1, 2], [1, 2], color='orange')
+
+
+# Parameters for Nadal's skill distribution.
+mu_n, sigma_n = player_at_convergence[0][1], player_at_convergence[0][2]
+
+# Parameters for Djokovic's skill distribution.
+mu_d, sigma_d = player_at_convergence[-1][1], player_at_convergence[-1][2]
 
 
 mu_n, sigma_n = player_at_convergence[0][1], player_at_convergence[0][2]
@@ -239,36 +298,36 @@ plt.legend()
 print(f"μ_n={mu_n**2} μ_d={mu_d**2}")
 
 
-# We want to find out the probability p(W0 - W15) > 0, where
-# W0 ~ N(µ_n, σ_n**2), W15 ~ N(µ_d, σ_d**2).
-# Wd = W0 - W15 is ~ N(mu_d - mu_n, sqrt(σ_d**2 + σ_n **2)).
 mu_difference = mu_n - mu_d
 sd_difference = np.sqrt(sigma_n**2 + sigma_d **2)
 
-# The probability that Wd > 0 is 1 - Φ(0), also
-# known as the survival function.
 f"p(w0 > w15) = {scipy.stats.norm(mu_difference, sd_difference).sf(0):.3f}"
 
 
 # We have some samples for w0, some for w15. We get t ~ N(w0-w15, 1)
 # Nadal beats Djokovic iff t > 0, so 1-Φ(0). As below, but samples are Gibbs.
-mu_t0 = np.mean(nadal_marginal - djokovic_marginal)
+mu_t0 = np.mean(nadal_marginal_samples - djokovic_marginal_samples)
 t0 = scipy.stats.norm(mu_t0, 1)
 
 x_t0 = np.linspace(mu_t0 - 3, mu_t0 + 3)
-plt.fill(x_t0, t0.pdf(x_t0), alpha=0.7)
+plt.fill(x_t0, t0.pdf(x_t0), alpha=0.7, label="t")
+plt.legend()
 
 
 # 1 - Φ_t0(0)
 f"p(t > 0 | w0, w15) = {t0.sf(0):.3f}" 
 
 
-cumulative_probability = 0
-for sample in skills_across_iterations:
-    t = scipy.stats.norm(sample[0]-sample[15], 1)
-    cumulative_probability += t.sf(0)
+games_nole_won = np.where(G[:, 0] == 15)
+won_against_nadal = []
+for index in games_nole_won[0]:
+    if G[index, 1] == 0:
+        won_against_nadal.append(index)
     
-f"p(t > 0 | w0, w15) = {cumulative_probability / len(skills_across_iterations):.3f}"
+won_against_nadal
+
+
+[t[i] for i in range(33, 39)]
 
 
 # Get some samples for w0 and w15 from the distributions output by message passing.
@@ -279,8 +338,8 @@ mu_t1 = np.mean(nadal_skill.rvs(size=10000) - djokovic_skill.rvs(size=10000))
 t1 = scipy.stats.norm(mu_t1, 1)
 
 x_t1 = np.linspace(mu_t1 - 3, mu_t1 + 3)
-plt.fill(x_t1, t1.pdf(x_t1), alpha=0.7)
 
+plt.fill(x_t1, t1.pdf(x_t1), alpha=0.7)
 plt.plot([0, 0], [0, 0.4], color='orange', alpha=0.5)
 
 
@@ -307,7 +366,7 @@ with matplotlib.rc_context({'figure.figsize': [20,3]}):
 plt.show()
 
 
-# Generating the priors.
+# Generate the priors.
 a, b = 1, 1
 l = scipy.stats.gamma(a, scale=b)
 m = scipy.stats.gamma(a, scale=b) 
@@ -317,7 +376,7 @@ t = scipy.stats.randint(1852, 1961)
 num_samples = 10
 theta_distribution = {}
 
-# Doing this once generates a posterior probability distribution for θ.
+# Generate a posterior probability distribution for θ - steps 1 to 5.
 for theta in years:
     y = {year: 0 for year in years}
     
@@ -340,7 +399,7 @@ thetas = np.array([[key, theta_distribution[key]] for key in theta_distribution.
 rng = np.random.default_rng()
 num_iterations = 1000
 
-# Now, I want to sample a single θ from that distribution.
+# Step 6.
 for it in range(num_iterations):
     print(f"Iteration: {it}")
     new_theta = int(rng.choice(thetas[:, 0], p=thetas[:, 1]))
@@ -362,8 +421,6 @@ for it in range(num_iterations):
     new_prob = np.prod(list(y.values()))
     
     # Update the probability for the θ we sampled.
-    print(f"Updating {theta} with new probability: {new_prob}")
     thetas[np.where(thetas[:, 0] == new_theta)[0][0]][1] = new_prob
-    print(np.sum(thetas[:, 1]))
 
 # After num_iterations, take the most likely θ.
