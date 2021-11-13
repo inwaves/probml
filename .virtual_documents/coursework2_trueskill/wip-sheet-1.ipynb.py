@@ -301,13 +301,100 @@ df.loc[counts.index, 'count'] = counts
 df = df.reset_index()
 df = df.loc[(df['year']>y) & (df['year']<Y)]
 
-with matplotlib.rc_context({'figure.figsize': [12,2]}):
+with matplotlib.rc_context({'figure.figsize': [20,6]}):
     plt.bar(df['year'].values, df['count'].values)
     plt.title('mine explosions per year')
 plt.show()
 
 
-l = scipy.stats.gamma
+# Generating the priors.
+a, b = 1, 1
+l = scipy.stats.gamma(a, scale=b)
+m = scipy.stats.gamma(a, scale=b) 
+t = scipy.stats.randint(1852, 1961)
+
+
+d = {'a': 3, 'b': 5}
+
+d = {it: d[it]/2 for it in d.keys()}
+
+np.sum(np.array(list(d.values())))
+
+
+
+
+
+num_samples = 10
+theta_distribution = {}
+
+# Doing this once generates a posterior probability distribution for θ.
+for theta in years:
+    y = {year: 0 for year in years}
+    
+    # Take T samples of lambda and mu, and use them to calculate the likelihood of our data.
+    for t in range(num_samples):
+        lamb = l.rvs()
+        mu = l.rvs()
+        
+        for year in y.keys():            
+            # What is the probability of the observed value under our 
+            # Poisson distribution parameterised by λ, μ, θ?
+            y[year] += scipy.stats.poisson.pmf(df.loc[df['year'] == year]['count'].tolist()[0], lamb if year <= theta else mu)
+    y = {key: y[key]/num_samples for key in y.keys()} # Renormalise the probabilities.
+    theta_distribution[theta] = np.sum(list(y.values()))
+
+
+# total = np.sum(list(theta_distribution.values()))
+# theta_distribution = {key: theta_distribution[key]/total for key in theta_distribution.keys()}
+# n = np.array([theta_distribution.keys(), theta_distribution.values()])
+# Now, I want to sample a single θ from that distribution.
+
+l = [[key, theta_distribution[key]] for key in theta_distribution.keys()]
+t = np.array(l)
+
+t[0]
+# For that θ, what is the likelihood of my data? Update that θ's probability within the distribution.
+# Resample. Resample. Resample.
+# After num_iterations, take the most likely θ.
+
+
+years = list(range(1852, 1961))
+dict_frame = df.set_index('year').T.to_dict('list')
+guess = 1852
+
+for iter in range(10000):
+    t = scipy.stats.randint(guess, 1961)
+    theta = t.rvs()
+    while True:
+        # Sample theta, lambda, mu.
+        l = scipy.stats.gamma(theta, scale=theta)
+        m = scipy.stats.gamma(theta, scale=theta)
+
+        lam, mu = l.rvs(), m.rvs()
+        # Compute sampled_y.
+        sample = {}
+        lambda_poisson = scipy.stats.poisson(lam)
+        mu_poisson = scipy.stats.poisson(mu)
+
+        for year in years:
+            sample[year] = lambda_poisson.rvs() if year <= theta else mu_poisson.rvs()
+
+            # Is sampled_y same as dict_frame? No? Continue.
+            if abs(sample[year]-dict_frame[year][0]) == 0:
+                same = False
+                break
+            same = True
+
+        if same:
+            break
+
+print(f"θ={theta}, λ={lamb}, μ={mu}")
+
+
+
+    
+fig = plt.figure(figsize=(20, 6))
+plt.bar(sample.keys(), sample.values(), width=0.8)
 
 
 wins = np.zeros(M, dtype=int)
