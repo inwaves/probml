@@ -93,7 +93,7 @@ per_word_perplexities = dict([(i, per_word_perplexity(document_likelihoods[i], B
 
 
 # Plot histogram of test document per-word log-Pr.
-fig, ax = plt.subplots(figsize=(14,8))
+fig, ax = plt.subplots(figsize=(10,6))
 
 # Distinct number of documents in B
 ax.bar(np.arange(len(per_word_likelihoods)), per_word_likelihoods.values(), align='center')
@@ -112,11 +112,23 @@ for (doc_id, logPr) in per_word_likelihoods.items():
         count_likelihoods[cts] += logPr
 
 
-ax.bar(np.arange(len(count_likelihoods)), count_likelihoods.values(), align='center')
-ax.set_xticks(np.arange(len(count_likelihoods)))
+fig, ax = plt.subplots(figsize=(8,4))
+ax.scatter(count_likelihoods.keys(), count_likelihoods.values())
 ax.set_xlabel("document length")
 ax.set_ylabel(r'$\log Pr(w_d)$')
 plt.show()
+
+
+sorted_dict = {k: v for k, v in sorted(per_word_perplexities.items(), key=lambda item: item[1])}
+
+
+B[B.doc_id==2618]["count"].sum()
+
+
+V[B[B.doc_id==2618]["word_id"]]
+
+
+V[B[B.doc_id==2000]["word_id"]]
 
 
 def bmm_generate(doc_length, V, α, γ, K):
@@ -130,7 +142,7 @@ for doc in bmm_generate(doc_length=[5,2,4], V=V, α=10, γ=.1, K=20):
     print(doc)
 
 
-def bmm_gibbs(doc_label, word_id, count, W, α, γ, K):
+def bmm_gibbs(doc_label, word_id, count, W, alpha, gamma, K):
     """word_id : Series of word_ids
        count : Series of counts
        doc_label : Series of document IDs
@@ -140,6 +152,7 @@ def bmm_gibbs(doc_label, word_id, count, W, α, γ, K):
     #             such that doc_labels[doc_index[j]] = doc_label[j]
     doc_labels, doc_index = np.unique(doc_label, return_inverse=True)
 
+    # This is the initial sampling for z_d.
     # z[i] = class of document i, where i enumerates the distinct doc_labels
     # doc_count[k] = number of documents of class k
     z = np.random.choice(K, len(doc_labels))
@@ -148,7 +161,7 @@ def bmm_gibbs(doc_label, word_id, count, W, α, γ, K):
 
     # A DataFrame indexed by document class that is used to count occurrences
     # of each word in documents of class k.
-    x = pandas.DataFrame({'doc_class': z[doc_index], 'word_id': word_id, 'count': count}) \
+    x = pd.DataFrame({'doc_class': z[doc_index], 'word_id': word_id, 'count': count}) \
         .groupby(['doc_class', 'word_id']) \
         ['count'].apply(sum) \
         .unstack(fill_value=0)
@@ -165,14 +178,13 @@ def bmm_gibbs(doc_label, word_id, count, W, α, γ, K):
 
             # Get the words, counts for document i
             # and remove this document from the counts.
-            # Why remove?
             w,c = word_id[doc_index==i].values, count[doc_index==i].values
             occurrences[z[i], w] -= c
             word_count[z[i]] -= sum(c)
             doc_count[z[i]] -= 1
 
             # Find the log probability that this document belongs to class k, marginalized over θ and β
-            logp = [... for k in range(K)]
+            logp = [np.log(((gamma + word_count[k])*(alpha + doc_count[k]))/((vocabulary_size*gamma + np.sum(word_count))*(K*alpha + np.sum(doc_count)))) for k in range(K)]
             p = np.exp(logp - np.max(logp)) # Why do we do this? Is it to renormalise?
             p = p/sum(p)
 
@@ -183,10 +195,47 @@ def bmm_gibbs(doc_label, word_id, count, W, α, γ, K):
             word_count[k] += sum(c)
             doc_count[k] += 1
         
-        yield np.copy(z)
+        yield np.copy(z), p
 
 
-g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), α=10, γ=.1, K=20)
-NUM_ITERATIONS = 20
+g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), alpha=10, gamma=.1, K=20)
+NUM_ITERATIONS = 10
+res = np.stack([next(g)[0] for _ in range(NUM_ITERATIONS)])
+# this produces a matrix with one row per iteration and a column for each unique doc_id
+
+
+x = np.arange(NUM_ITERATIONS)
+fig, ax = plt.subplots(figsize=(  20, 6))
+for d in range(len(res[0])):
+    ax.plot(x, res[:, d])
+
+
+g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), alpha=10, gamma=.1, K=20)
+NUM_ITERATIONS = 10
 res = np.stack([next(g) for _ in range(NUM_ITERATIONS)])
 # this produces a matrix with one row per iteration and a column for each unique doc_id
+
+
+x = np.arange(NUM_ITERATIONS)
+fig, ax = plt.subplots(figsize=(  20, 6))
+for d in range(len(res[0])):
+    ax.plot(x, res[:, d])
+
+
+g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), alpha=10, gamma=.1, K=20)
+NUM_ITERATIONS = 10
+zs = []
+for _ in range(NUM_ITERATIONS):
+    z, prob = next(g)
+    zs.append(z)
+
+res = np.stack(zs)
+
+prob
+# this produces a matrix with one row per iteration and a column for each unique doc_id
+
+
+x = np.arange(NUM_ITERATIONS)
+fig, ax = plt.subplots(figsize=(  20, 6))
+for d in range(len(res[0])):
+    ax.plot(x, res[:, d])
