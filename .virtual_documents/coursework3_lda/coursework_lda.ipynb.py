@@ -13,7 +13,7 @@ r = requests.get('https://www.cl.cam.ac.uk/teaching/2122/DataSci/data/kos_doc_da
 with io.BytesIO(r.content) as f:
     data = scipy.io.loadmat(f)
     V = np.array([i[0] for i in data['V'].squeeze()])
-    A,B = [pandas.DataFrame({'doc_id': M[:,0]-1, 'word_id': M[:,1]-1, 'count': M[:,2]}, 
+    A,B = [pd.DataFrame({'doc_id': M[:,0]-1, 'word_id': M[:,1]-1, 'count': M[:,2]}, 
                             columns=['doc_id','word_id','count']) 
            for M in (data['A'],data['B'])]
 
@@ -47,9 +47,6 @@ This word is not in any training documents:
 {A[A["word_id"]==5479]}
 This word is in our test document: 
 {B[B.doc_id==2527].loc[54865]}""")
-
-
-gamma(0.1*vocabulary_size)
 
 
 def per_word_perplexity(p_w, n):
