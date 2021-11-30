@@ -50,13 +50,73 @@ This word is in our test document:
 
 
 def per_word_perplexity(p_w, n):
-    return -np.log2(p_w)/n
+    # Make sure we don't try to take log 0.
+    return -np.log2(p_w)/n if p_w > 0 else 0
 
-def per_Word_likelihood(p_w, n):
-    return np.log(p_w)/n
+def per_word_likelihood(p_w, n):
+    return np.log(p_w)/n if p_w > 0 else 0
 
 
+alpha = 0.1
 
+# Implement the posterior predictive we got in (b).
+betas = np.zeros(vocabulary_size)
+for i in range(vocabulary_size):
+    betas[i] = (A[A.word_id == i]["count"].sum() + alpha) / (vocabulary_size*alpha + wordcount_entire_collection)
+
+
+unique_test_docs = np.unique(B.doc_id.values)
+document_likelihoods = {}
+
+# For each document d in the test set,
+for doc in unique_test_docs:
+    Pr = 1
+    doc_df = B[B.doc_id==doc]
+    
+    # For each word in document d, multiply the β_v with the other words β_w
+    for word in doc_df.word_id.values:
+        Pr *= betas[word] ** doc_df[doc_df.word_id==word]["count"].values[0]
+        
+    # Store the likelihood.
+    document_likelihoods[doc] = Pr
+
+
+c_2000 = B[B.doc_id==2000]["count"].sum()
+c_2001 = B[B.doc_id==2001]["count"].sum()
+print(f"For doc_id=2000, per-word log likelihood is: {per_word_likelihoods[2000]}. It contains: {c_2000} words.")
+print(f"For doc_id=2001, per-word log likelihood is: {per_word_likelihoods[2001]}. It contains: {c_2001} words.")
+
+
+# Compute per-word likelihoods and perplexities.
+per_word_likelihoods = dict([(i, per_word_likelihood(document_likelihoods[i], B[B.doc_id==i]["count"].sum())) for i in document_likelihoods.keys()])
+per_word_perplexities = dict([(i, per_word_perplexity(document_likelihoods[i], B[B.doc_id==i]["count"].sum())) for i in document_likelihoods.keys()])
+
+
+# Plot histogram of test document per-word log-Pr.
+fig, ax = plt.subplots(figsize=(14,8))
+
+# Distinct number of documents in B
+ax.bar(np.arange(len(per_word_likelihoods)), per_word_likelihoods.values(), align='center')
+ax.set_xticks(np.arange(len(per_word_likelihoods)))
+ax.set_xlabel("doc_id")
+ax.set_ylabel(r'$\log Pr(w_d)$')
+plt.show()
+
+
+count_likelihoods = {}
+for (doc_id, logPr) in per_word_likelihoods.items():
+    cts = B[B.doc_id==doc_id]["count"].sum()
+    if cts not in count_likelihoods:
+        count_likelihoods[cts] = logPr
+    else:
+        count_likelihoods[cts] += logPr
+
+
+ax.bar(np.arange(len(count_likelihoods)), count_likelihoods.values(), align='center')
+ax.set_xticks(np.arange(len(count_likelihoods)))
+ax.set_xlabel("document length")
+ax.set_ylabel(r'$\log Pr(w_d)$')
+plt.show()
 
 
 def bmm_generate(doc_length, V, α, γ, K):
