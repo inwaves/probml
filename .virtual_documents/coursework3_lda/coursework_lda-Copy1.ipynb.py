@@ -186,7 +186,7 @@ def bmm_gibbs(doc_label, word_id, count, W, alpha, gamma, K):
             # Find the log probability that this document belongs to class k, marginalized over θ and β
 #             beta_marginalisation = (gamma + word_count[k]) / (vocabulary_size*gamma + some_sum)
 #             theta_marginalisation = (alpha + doc_count[k]) / (K*alpha + np.sum(doc_count))
-            logp = [np.log(((np.prod(gamma + occurrences[k, w])) / (vocabulary_size*gamma + word_count[k])) * ((alpha + doc_count[k]) / (K*alpha + np.sum(doc_count)))) for k in range(K)]
+            logp = [np.log(((gamma + np.sum(occurrences[k, w])) / (vocabulary_size*gamma + np.sum(occurrences[k]))) * ((alpha + doc_count[k]) / (K*alpha + np.sum(doc_count))))  for k in range(K)]
             p = np.exp(logp - np.max(logp))
             p = p/sum(p)
 
@@ -204,103 +204,3 @@ g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), alpha=10, gamma=.
 NUM_ITERATIONS = 10
 res = np.stack([next(g)[0] for _ in range(NUM_ITERATIONS)])
 # this produces a matrix with one row per iteration and a column for each unique doc_id
-
-
-K=20
-doc_label, word_id, count = A['doc_id'], A['word_id'], A['count']
-# doc_labels = distinct values of doc_label
-# doc_index = a list as long as doc_label
-#             such that doc_labels[doc_index[j]] = doc_label[j]
-doc_labels, doc_index = np.unique(doc_label, return_inverse=True)
-
-# This is the initial sampling for z_d.
-# z[i] = class of document i, where i enumerates the distinct doc_labels
-# doc_count[k] = number of documents of class k
-z = np.ones(len(doc_labels), dtype=np.int32)
-z[0] = 5
-doc_count = np.zeros(K, dtype=int)
-for k in z: doc_count[k] += 1
-
-# A DataFrame indexed by document class that is used to count occurrences
-# of each word in documents of class k.
-x = pd.DataFrame({'doc_class': z[doc_index], 'word_id': word_id, 'count': count}) \
-    .groupby(['doc_class', 'word_id']) \
-    ['count'].apply(sum) \
-    .unstack(fill_value=0)
-
-# occurrences[k,w] = number of occurrences of word_id w in documents of class k
-occurrences = np.zeros((K, len(V)))
-occurrences[x.index.values.reshape((-1,1)), x.columns.values] = x
-
-# word_count[k] = total number of words in documents of class k
-word_count = np.sum(occurrences, axis=1)
-
-
-np.product(occurrences[3]+0.1)
-
-
-gamma, alpha = .1, 10
-# Get the words, counts for document i
-# and remove this document from the counts.
-w,c = word_id[doc_index==0].values, count[doc_index==0].values
-occurrences[z[0], w] -= c
-word_count[z[0]] -= sum(c)
-doc_count[z[0]] -= 1
-
-# Find the log probability that this document belongs to class k, marginalized over θ and β
-#             beta_marginalisation = (gamma + word_count[k]) / (vocabulary_size*gamma + some_sum)
-#             theta_marginalisation = (alpha + doc_count[k]) / (K*alpha + np.sum(doc_count))
-logp = [np.log(((gamma + sum(c)) / (vocabulary_size*gamma + word_count[k])) * ((alpha + doc_count[k]) / (K*alpha + np.sum(doc_count))))  for k in range(K)]
-p = np.exp(logp - np.max(logp))
-p = p/sum(p)
-
-k = np.random.choice(K, p=p)
-z[0] = k
-occurrences[k, w] += c
-word_count[k] += sum(c)
-doc_count[k] += 1
-
-
-for k in range(K):
-    print(f"K = {k}, wc_k={word_count[k]}, sum_wc={np.sum(word_count)}, dc_k={doc_count[k]}, sum_dc={np.sum(doc_count)}")
-
-
-p
-
-
-x = np.arange(NUM_ITERATIONS)
-fig, ax = plt.subplots(figsize=(20, 6))
-# ax.plot(x, res[:, 5])
-for d in range(1000):
-    ax.plot(x, res[:, d])
-
-
-g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), alpha=10, gamma=.1, K=20)
-NUM_ITERATIONS = 10
-res = np.stack([next(g) for _ in range(NUM_ITERATIONS)])
-# this produces a matrix with one row per iteration and a column for each unique doc_id
-
-
-x = np.arange(NUM_ITERATIONS)
-fig, ax = plt.subplots(figsize=(  20, 6))
-for d in range(len(res[0])):
-    ax.plot(x, res[:, d])
-
-
-g = bmm_gibbs(A['doc_id'], A['word_id'], A['count'], W=len(V), alpha=10, gamma=.1, K=20)
-NUM_ITERATIONS = 10
-zs = []
-for _ in range(NUM_ITERATIONS):
-    z, prob = next(g)
-    zs.append(z)
-
-res = np.stack(zs)
-
-prob
-# this produces a matrix with one row per iteration and a column for each unique doc_id
-
-
-x = np.arange(NUM_ITERATIONS)
-fig, ax = plt.subplots(figsize=(  20, 6))
-for d in range(len(res[0])):
-    ax.plot(x, res[:, d])
